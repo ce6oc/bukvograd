@@ -1,5 +1,6 @@
-/* Буквоград: офлайн-кэш. Поднимайте версию при изменении файлов. */
-const CACHE = 'bukvograd-v1';
+/* Буквоград: офлайн-кэш. Поднимайте версию при изменении файлов.
+   Аудиоклипы (audio/*.m4a) кэшируются лениво при первом воспроизведении. */
+const CACHE = 'bukvograd-v2';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {
@@ -23,8 +24,10 @@ self.addEventListener('fetch', e => {
   if (req.mode === 'navigate') {
     e.respondWith(
       fetch(req).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put('./index.html', copy));
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put('./index.html', copy));
+        }
         return res;
       }).catch(() => caches.match('./index.html').then(r => r || caches.match('./')))
     );
@@ -36,8 +39,11 @@ self.addEventListener('fetch', e => {
   if (url.origin === location.origin || isFont) {
     e.respondWith(
       caches.match(req).then(hit => hit || fetch(req).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy));
+        // 404/ошибки не кэшируем, иначе битые ответы застревают навсегда
+        if (res && (res.ok || res.type === 'opaque')) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(req, copy));
+        }
         return res;
       }).catch(() => caches.match(req)))
     );

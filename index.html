@@ -597,12 +597,33 @@ let ruVoice=null,talkingEl=null,talkTimer=null;
 function pickVoice(){if(!synth)return null;const vs=synth.getVoices().filter(v=>/^ru/i.test(v.lang));
   ruVoice=vs.find(v=>/Milena|Google|Yuri|Alena/i.test(v.name))||vs[0]||null;return ruVoice}
 if(synth){pickVoice();synth.onvoiceschanged=pickVoice}
-function stopTalk(){if(talkingEl){talkingEl.classList.remove('talking');talkingEl=null}if(talkTimer){clearTimeout(talkTimer);talkTimer=null}if(synth)try{synth.cancel()}catch(e){}}
-function speak(text,onEnd){
-  if(!st.settings.sound||!synth){if(onEnd)onEnd();return}
+function stopTalk(){if(talkingEl){talkingEl.classList.remove('talking');talkingEl=null}if(talkTimer){clearTimeout(talkTimer);talkTimer=null}if(synth)try{synth.cancel()}catch(e){}if(curAudio){try{curAudio.pause()}catch(e){}curAudio=null}}
+/* Встроенный голос: клипы audio/<fnv1a16>.m4a, сгенерированные tools/gen_audio.py (голос Ирина).
+   Хэш считается от текста фразы, поэтому манифест не нужен. Последовательность строк = очередь клипов. */
+let curAudio=null;
+function hash36(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0}return (h>>>0).toString(16)}
+function synthSpeak(text,onEnd){
+  if(!synth){if(onEnd)onEnd();return}
   try{synth.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='ru-RU';u.rate=.85;u.pitch=1.12;u.volume=1;
   const v=pickVoice();if(v)u.voice=v;let done=false;const fin=()=>{if(done)return;done=true;if(onEnd)onEnd()};
   u.onend=fin;u.onerror=fin;synth.speak(u);setTimeout(fin,text.length*110+2200)}catch(e){if(onEnd)onEnd()}
+}
+function speak(items,onEnd){
+  if(!st.settings.sound){if(onEnd)onEnd();return}
+  if(typeof items==='string')items=[items];
+  const joined=items.join(' ');let i=0,done=false;
+  const fin=()=>{if(done)return;done=true;if(onEnd)onEnd()};
+  if(synth)try{synth.cancel()}catch(e){}
+  const next=()=>{
+    if(i>=items.length)return fin();
+    try{if(curAudio){try{curAudio.pause()}catch(e){}}
+      const a=new Audio('audio/'+hash36(items[i])+'.m4a');curAudio=a;
+      a.onended=()=>{i++;next()};
+      a.onerror=()=>{console.warn('[speak] нет клипа, резервный синтез:',items[i]);synthSpeak(joined,fin)};
+      a.play().catch(fin);
+    }catch(e){synthSpeak(joined,fin)}
+  };
+  next();
 }
 function talk(charEl,bubbleEl,text,speakText){
   if(bubbleEl){bubbleEl.textContent=text;bubbleEl.style.animation='none';void bubbleEl.offsetWidth;bubbleEl.style.animation=''}
@@ -1076,7 +1097,7 @@ function roundFind(host,idx,hooks){
       head.say(pick(PRAISE)+' Это '+DATA[idx].ch+'!',pick(PRAISE));
       schedule(()=>hooks.done(),950);
     }else{t.classList.add('bad');sfx.no();hooks.miss();
-      head.say(`Это буква ${DATA[i].ch}. Ищем ${DATA[idx].ch}!`,`Это ${DATA[i].name}. Ищем ${DATA[idx].name}`)}
+      head.say(`Это буква ${DATA[i].ch}. Ищем ${DATA[idx].ch}!`,['Это '+DATA[i].name+'.','Ищем '+DATA[idx].name])}
   }));
 }
 function roundWord(host,idx,hooks){
@@ -1096,7 +1117,7 @@ function roundWord(host,idx,hooks){
       head.say(`${DATA[i].word}! Здесь живёт ${DATA[idx].ch}!`,`${DATA[i].word}! Здесь живёт буква ${DATA[idx].name}`);
       schedule(()=>hooks.done(),1250);
     }else{t.classList.add('bad');sfx.no();hooks.miss();
-      head.say(`Это ${DATA[i].word}. Тут нет буквы ${DATA[idx].ch} 🙂`,`${DATA[i].word}. Тут нет буквы ${DATA[idx].name}`)}
+      head.say(`Это ${DATA[i].word}. Тут нет буквы ${DATA[idx].ch} 🙂`,[DATA[i].word,'Тут нет буквы '+DATA[idx].name])}
   }));
 }
 function roundPairs(host,letters,hooks){
@@ -1159,7 +1180,7 @@ function roundCatch(host,idx,hooks){
       else spawn(Math.random()<.45);
     }else{sfx.no();hooks.miss();b.vx*=-1.8;b.vy*=-1.8;
       b.el.animate([{rotate:'0deg'},{rotate:'-14deg'},{rotate:'12deg'},{rotate:'0deg'}],{duration:380});
-      head.say(`Это ${DATA[b.i].ch}. Лови только ${DATA[idx].ch}!`,`Это ${DATA[b.i].name}. Лови только ${DATA[idx].name}`)}
+      head.say(`Это ${DATA[b.i].ch}. Лови только ${DATA[idx].ch}!`,['Это '+DATA[b.i].name+'.','Лови только '+DATA[idx].name])}
   }
   for(let k=0;k<7;k++)spawn(k<2);
   function loop(now){
@@ -1328,7 +1349,7 @@ function renderParents(sec){
       <div class="par-row"><span>Звук и голос</span><label class="switch"><input type="checkbox" id="swSound" ${st.settings.sound?'checked':''}><span class="tr"></span></label></div>
       <div class="par-row"><span>Свободный режим<br><small style="color:var(--ink2)">все буквы открыты сразу</small></span><label class="switch"><input type="checkbox" id="swFree" ${st.settings.free?'checked':''}><span class="tr"></span></label></div>
       <div class="par-row"><span>Русский голос</span><button class="btn small ghost" id="voiceTest">🔊 Проверить</button></div>
-      <p class="par-note" id="voiceNote">${vs.length?`Найден голос: ${vs[0].name}`:'Русский голос пока не найден. Если буквы молчат — установите русский голос в настройках системы (TTS). Всё остальное работает и без него.'}</p>
+      <p class="par-note" id="voiceNote">Встроенный голос «Ирина» — работает офлайн и не зависит от системных настроек.</p>
       ${deferredPrompt?'<div class="par-btns"><button class="btn small" id="installBtn" style="--c:var(--sky-d);--cd:#38588A">📲 Установить приложение</button></div>':''}
       <p class="par-note">📱 iPad: «Поделиться» → «На экран „Домой“». Android: меню браузера → «Установить приложение». После установки работает офлайн.</p>
     </div>
@@ -1351,9 +1372,7 @@ function renderParents(sec){
   sec.querySelector('#backBtn').addEventListener('click',()=>{sfx.tap();go('home')});
   sec.querySelector('#swSound').addEventListener('change',e=>{st.settings.sound=e.target.checked;save();syncSound();if(st.settings.sound)sfx.ok()});
   sec.querySelector('#swFree').addEventListener('change',e=>{st.settings.free=e.target.checked;save();sfx.tap();toast(st.settings.free?'Все буквы открыты 🔓':'Буквы снова открываются по порядку')});
-  sec.querySelector('#voiceTest').addEventListener('click',()=>{pickVoice();speak('Привет! Я Буквик. Давай учить буквы вместе!');
-    const v2=synth?synth.getVoices().filter(v=>/^ru/i.test(v.lang)):[];
-    sec.querySelector('#voiceNote').textContent=v2.length?`Найден голос: ${v2[0].name}`:'Русский голос не найден — установите русский TTS-голос в системе.'});
+  sec.querySelector('#voiceTest').addEventListener('click',()=>{speak('Привет! Я Буквик. Давай учить буквы вместе!')});
   const ib=sec.querySelector('#installBtn');
   if(ib)ib.addEventListener('click',async()=>{try{deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;ib.remove()}catch(e){}});
   sec.querySelector('#expBtn').addEventListener('click',()=>{
@@ -1416,7 +1435,9 @@ $('#btnParents').addEventListener('click',()=>{sfx.tap();go('parents')});
 $('#logo').addEventListener('click',()=>{sfx.tap();go('home')});
 $('#logoChar').innerHTML=charSVG(-1,{size:34,letter:'Б',variant:0});
 document.addEventListener('pointerdown',function init(){removeEventListener('pointerdown',init);
-  if(st.settings.sound){audio();if(synth){try{const u=new SpeechSynthesisUtterance('а');u.volume=0;u.lang='ru-RU';synth.speak(u)}catch(e){}}}
+  if(st.settings.sound){audio();
+    try{const u=new Audio('data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQIAAAAAAA==');u.volume=0;const p=u.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}
+    if(synth){try{const u=new SpeechSynthesisUtterance('а');u.volume=0;u.lang='ru-RU';synth.speak(u)}catch(e){}}}
 },{once:true});
 document.addEventListener('contextmenu',e=>{if(!/INPUT|TEXTAREA/.test(e.target.tagName))e.preventDefault()});
 syncSound();
